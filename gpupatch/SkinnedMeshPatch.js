@@ -197,7 +197,7 @@ function patchPixiSpine(options) {
             projection3d[12] = projection2d.tx;
             projection3d[13] = projection2d.ty;
 
-            var currentProjection = spineObj.projectionMatrix;
+            var currentProjection = spineObj.worldProjectionMatrix;
             if (currentProjection) {
                 glMat.mat4.multiply(projection3d, projection3d, currentProjection);
             }
@@ -676,6 +676,17 @@ function patchPixiSpine(options) {
         }
     };
 
+    core.spine.Spine.prototype.showSlots = function () {
+        this._childrensAreInvisible = false;
+        for (var i = 0; i < this.slotContainers.length; i++) {
+            var slot = this.slotContainers[i];
+            var ch = slot.children[0];
+            if (ch) {
+                ch.visible = true;
+            }
+        }
+    };
+
     var oldRender = core.spine.Spine.prototype._renderWebGL3d;
 
     core.spine.Spine.prototype._renderWebGL3d = function (renderer) {
@@ -703,24 +714,28 @@ function patchPixiSpine(options) {
     };
 
     core.spine.Spine.prototype.getLocalBounds = function () {
-        if (!this._childrensAreInvisible)
-            return PIXI.Container.prototype.getLocalBounds.call(this);
+        if (!this._childrensAreInvisible || this._boundsFound)
+            return this.spineGetLocalBounds();
         up.call(this, 0);
-        var bounds = PIXI.Container.prototype.getLocalBounds.call(this);
+        var bounds = this.spineGetLocalBounds();
         this.hideSlots();
         return bounds;
     };
 
     core.spine.Spine.prototype.getBounds = function () {
         if (!this.spineData.skinnedMeshId || !this.parent)
-            return core.Container.prototype.getBounds.call(this);
+            return this.containerGetBounds();
+        if (this._boundsFound)
+            return this.spineGetBounds();
         var now = Date.now();
         var old = now - boundaryCacheLag;
         var hasFilter = this._mask || this._filters && this._filters.length;
         if (hasFilter || !this._boundsCache || this._boundsCacheTime < old || this._boundsCacheTime > now) {
-            up.call(this, 0);
-            PIXI.Container.prototype.updateTransform.call(this);
-            this._boundsCache = core.Container.prototype.getBounds.call(this);
+            this.showSlots();
+            if (!is3d) {
+                this.containerUpdateTransform();
+            }
+            this._boundsCache = this.spineGetBounds();
             this._boundsCacheTime = now;
             this.hideSlots();
         }
@@ -732,9 +747,9 @@ function patchPixiSpine(options) {
             return false;
         var skeleton = this.skeleton;
         if (this._childrensAreInvisible) {
-            up.call(this, 0);
-            PIXI.Container.prototype.updateTransform.call(this);
-            this._childrensAreInvisible = false;
+            if (!is3d) {
+                this.showSlots();
+            }
             this._boundsCache = null;
             this.getBounds();
         }

@@ -1,11 +1,13 @@
 var spine = require('../SpineRuntime');
 var atlasParser = require('../loaders/atlasParser');
 
-var is3d = !!PIXI.flip;
-var ContainerClass = is3d ? PIXI.flip.Container3d : PIXI.Container;;
-var SpriteClass = is3d ? PIXI.flip.Sprite3d : PIXI.Sprite;
+var core = PIXI;
+var is3d = !!core.flip;
+var ContainerClass = is3d ? core.flip.Container3d : core.Container;
+;
+var SpriteClass = is3d ? core.flip.Sprite3d : core.Sprite;
+var MeshClass = is3d ? core.flip.Mesh3d : core.mesh.Mesh;
 var updateTransformField = is3d ? "updateTransform3d" : "updateTransform";
-var setRotation = is3d? function(s, v) {s.rotation.z=v;} : function(s, v) {s.rotation=v;};
 /* Esoteric Software SPINE wrapper for pixi.js */
 spine.Bone.yDown = true;
 
@@ -23,17 +25,14 @@ spine.Bone.yDown = true;
  * @memberof PIXI.spine
  * @param spineData {object} The spine data loaded from a spine atlas.
  */
-function Spine(spineData)
-{
+function Spine(spineData) {
     ContainerClass.call(this);
 
-    if (!spineData)
-    {
+    if (!spineData) {
         throw new Error('The spineData param is required.');
     }
 
-    if ((typeof spineData) === "string")
-    {
+    if ((typeof spineData) === "string") {
         throw new Error('spineData param cant be string. Please use PIXI.spine.Spine.fromAtlas("YOUR_RESOURCE_NAME") from now on.');
     }
 
@@ -73,35 +72,38 @@ function Spine(spineData)
      */
     this.slotContainers = [];
 
-    for (var i = 0, n = this.skeleton.slots.length; i < n; i++)
-    {
+    for (var i = 0, n = this.skeleton.slots.length; i < n; i++) {
         var slot = this.skeleton.slots[i];
         var attachment = slot.attachment;
         var slotContainer = new ContainerClass();
         this.slotContainers.push(slotContainer);
         this.addChild(slotContainer);
 
-        if (attachment instanceof spine.RegionAttachment)
-        {
+        if (attachment instanceof spine.RegionAttachment) {
             var spriteName = attachment.rendererObject.name;
             var sprite = this.createSprite(slot, attachment);
             slot.currentSprite = sprite;
             slot.currentSpriteName = spriteName;
             slotContainer.addChild(sprite);
         }
-        else if (attachment instanceof spine.MeshAttachment)
-        {
+        else if (attachment instanceof spine.MeshAttachment) {
             var mesh = this.createMesh(slot, attachment);
             slot.currentMesh = mesh;
             slot.currentMeshName = attachment.name;
             slotContainer.addChild(mesh);
         }
-        else
-        {
+        else {
             continue;
         }
 
     }
+
+    this._bounds2 = new core.Rectangle();
+
+    this.boundsAttachmentName = "bounds";
+    this._boundsFound = false;
+    this._boundsVertices = null;
+    this.findBounds();
 
     /**
      * Should the Spine object update its transforms
@@ -111,11 +113,10 @@ function Spine(spineData)
     this.autoUpdate = true;
 }
 
-Spine.fromAtlas = function(resourceName) {
+Spine.fromAtlas = function (resourceName) {
     var skeletonData = atlasParser.AnimCache[resourceName];
 
-    if (!skeletonData)
-    {
+    if (!skeletonData) {
         throw new Error('Spine data "' + resourceName + '" does not exist in the animation cache');
     }
 
@@ -156,8 +157,7 @@ Object.defineProperties(Spine.prototype, {
  *
  * @param dt {number} Delta time. Time by which the animation should be updated
  */
-Spine.prototype.update = function (dt)
-{
+Spine.prototype.update = function (dt) {
     this.state.update(dt);
     this.state.apply(this.skeleton);
     this.skeleton.updateWorldTransform();
@@ -165,42 +165,33 @@ Spine.prototype.update = function (dt)
     var drawOrder = this.skeleton.drawOrder;
     var slots = this.skeleton.slots;
 
-    for (var i = 0, n = drawOrder.length; i < n; i++)
-    {
+    for (var i = 0, n = drawOrder.length; i < n; i++) {
         this.children[i] = this.slotContainers[drawOrder[i]];
     }
-
-    for (i = 0, n = slots.length; i < n; i++)
-    {
+    this.findBounds();
+    for (i = 0, n = slots.length; i < n; i++) {
         var slot = slots[i];
         var attachment = slot.attachment;
         var slotContainer = this.slotContainers[i];
 
-        if (!attachment)
-        {
+        if (!attachment) {
             slotContainer.visible = false;
             continue;
         }
 
         var type = attachment.type;
-        if (type === spine.AttachmentType.region)
-        {
-            if (attachment.rendererObject)
-            {
-                if (!slot.currentSpriteName || slot.currentSpriteName !== attachment.rendererObject.name)
-                {
+        if (type === spine.AttachmentType.region) {
+            if (attachment.rendererObject) {
+                if (!slot.currentSpriteName || slot.currentSpriteName !== attachment.rendererObject.name) {
                     var spriteName = attachment.rendererObject.name;
-                    if (slot.currentSprite !== undefined)
-                    {
+                    if (slot.currentSprite !== undefined) {
                         slot.currentSprite.visible = false;
                     }
                     slot.sprites = slot.sprites || {};
-                    if (slot.sprites[spriteName] !== undefined)
-                    {
+                    if (slot.sprites[spriteName] !== undefined) {
                         slot.sprites[spriteName].visible = true;
                     }
-                    else
-                    {
+                    else {
                         var sprite = this.createSprite(slot, attachment);
                         slotContainer.addChild(sprite);
                     }
@@ -218,35 +209,30 @@ Spine.prototype.update = function (dt)
             var rot = -(slot.bone.worldRotation * spine.degRad);
             if (bone.worldFlipX) {
                 slotContainer.scale.x = -slotContainer.scale.x;
-                setRotation(slotContainer, -(slot.bone.worldRotation * spine.degRad));
+                slotContainer.rotation = -(slot.bone.worldRotation * spine.degRad);
                 rot = -rot;
             }
             if (bone.worldFlipY == spine.Bone.yDown) {
                 slotContainer.scale.y = -slotContainer.scale.y;
                 rot = -rot;
             }
-            setRotation(slotContainer, rot);
+            slotContainer.rotation = rot;
             slot.currentSprite.blendMode = slot.blendMode;
-            slot.currentSprite.tint = PIXI.utils.rgb2hex([slot.r,slot.g,slot.b]);
+            slot.currentSprite.tint = core.utils.rgb2hex([slot.r, slot.g, slot.b]);
         }
-        else if (type === spine.AttachmentType.skinnedmesh || type === spine.AttachmentType.mesh)
-        {
-            if (!slot.currentMeshName || slot.currentMeshName !== attachment.name)
-            {
+        else if (type === spine.AttachmentType.skinnedmesh || type === spine.AttachmentType.mesh) {
+            if (!slot.currentMeshName || slot.currentMeshName !== attachment.name) {
                 var meshName = attachment.name;
-                if (slot.currentMesh !== undefined)
-                {
+                if (slot.currentMesh !== undefined) {
                     slot.currentMesh.visible = false;
                 }
 
                 slot.meshes = slot.meshes || {};
 
-                if (slot.meshes[meshName] !== undefined)
-                {
+                if (slot.meshes[meshName] !== undefined) {
                     slot.meshes[meshName].visible = true;
                 }
-                else
-                {
+                else {
                     var mesh = this.createMesh(slot, attachment);
                     slotContainer.addChild(mesh);
                 }
@@ -258,8 +244,7 @@ Spine.prototype.update = function (dt)
             attachment.computeWorldVertices(slot.bone.skeleton.x, slot.bone.skeleton.y, slot, slot.currentMesh.vertices);
 
         }
-        else
-        {
+        else {
             slotContainer.visible = false;
             continue;
         }
@@ -269,13 +254,34 @@ Spine.prototype.update = function (dt)
     }
 };
 
+Spine.prototype.findBounds = function() {
+    if (!this._boundsFound || !this._boundsFound.attachment || !this._boundsFound.attachment.name != this.boundsAttachmentName) {
+        this._boundsFound = null;
+        var slots = this.skeleton.slots;
+        for (var i = 0, n = slots.length; i < n; i++) {
+            var slot = slots[i];
+            var attachment = slot.attachment;
+            if (attachment && attachment.type == spine.AttachmentType.boundingbox && attachment.name == this.boundsAttachmentName) {
+                this._boundsFound = slot;
+                break;
+            }
+        }
+    }
+    if (this._boundsFound) {
+        var slot = this._boundsFound;
+        var attachment = slot.attachment;
+        if (!this._boundsVertices)
+            this._boundsVertices = new Float32Array(attachment.vertices.length);
+        attachment.computeWorldVertices(0, 0, slot.bone, this._boundsVertices);
+    }
+};
+
 /**
  * When autoupdate is set to yes this function is used as pixi's updateTransform function
  *
  * @private
  */
-Spine.prototype.autoUpdateTransform = function ()
-{
+Spine.prototype.autoUpdateTransform = function () {
     if (Spine.globalAutoUpdate) {
         this.lastTime = this.lastTime || Date.now();
         var timeDelta = (Date.now() - this.lastTime) * 0.001;
@@ -295,21 +301,20 @@ Spine.prototype.autoUpdateTransform = function ()
  * @param attachment {spine.RegionAttachment} The attachment that the sprite will represent
  * @private
  */
-Spine.prototype.createSprite = function (slot, attachment)
-{
+Spine.prototype.createSprite = function (slot, attachment) {
     var descriptor = attachment.rendererObject;
     var baseTexture = descriptor.page.rendererObject;
-    var spriteRect = new PIXI.Rectangle(descriptor.x,
-                                        descriptor.y,
-                                        descriptor.rotate ? descriptor.height : descriptor.width,
-                                        descriptor.rotate ? descriptor.width : descriptor.height);
-    var spriteTexture = new PIXI.Texture(baseTexture, spriteRect);
+    var spriteRect = new core.Rectangle(descriptor.x,
+        descriptor.y,
+        descriptor.rotate ? descriptor.height : descriptor.width,
+        descriptor.rotate ? descriptor.width : descriptor.height);
+    var spriteTexture = new core.Texture(baseTexture, spriteRect);
     var sprite = new SpriteClass(spriteTexture);
 
     var baseRotation = descriptor.rotate ? Math.PI * 0.5 : 0.0;
     sprite.scale.x = attachment.width / descriptor.originalWidth * attachment.scaleX;
     sprite.scale.y = attachment.height / descriptor.originalHeight * attachment.scaleY;
-    setRotation(sprite, baseRotation - (attachment.rotation * spine.degRad));
+    sprite.rotation = baseRotation - (attachment.rotation * spine.degRad);
     sprite.anchor.x = (0.5 * descriptor.originalWidth - descriptor.offsetX) / descriptor.width;
     sprite.anchor.y = 1.0 - ((0.5 * descriptor.originalHeight - descriptor.offsetY) / descriptor.height);
     sprite.alpha = attachment.a;
@@ -331,18 +336,17 @@ Spine.prototype.createSprite = function (slot, attachment)
  * @param attachment {spine.RegionAttachment} The attachment that the sprite will represent
  * @private
  */
-Spine.prototype.createMesh = function (slot, attachment)
-{
+Spine.prototype.createMesh = function (slot, attachment) {
     var descriptor = attachment.rendererObject;
     var baseTexture = descriptor.page.rendererObject;
-    var texture = new PIXI.Texture(baseTexture);
+    var texture = new core.Texture(baseTexture);
 
-    var strip = new PIXI.mesh.Mesh(
+    var strip = new MeshClass(
         texture,
         new Float32Array(attachment.uvs.length),
         new Float32Array(attachment.uvs),
         new Uint16Array(attachment.triangles),
-        PIXI.mesh.Mesh.DRAW_MODES.TRIANGLES);
+        core.mesh.Mesh.DRAW_MODES.TRIANGLES);
 
     strip.canvasPadding = 1.5;
 
@@ -353,3 +357,58 @@ Spine.prototype.createMesh = function (slot, attachment)
 
     return strip;
 };
+
+
+Spine.prototype.getLocalBounds = function () {
+    var matrixCache = this.worldTransform;
+    this.worldTransform = core.Matrix.IDENTITY;
+    if (is3d) {
+        var matrixCache2 = this.worldTransform3d;
+        this.worldTransform3d = core.flip.math3d.IDENTITY;
+    }
+
+    var r = null;
+    if (this._boundsFound) {
+         r = this.meshGetBounds();
+    } else {
+        for (var i = 0, j = this.children.length; i < j; ++i) {
+            this.children[i].updateTransform3d();
+        }
+    }
+
+    this.worldTransform = matrixCache;
+    if (is3d) {
+        this.worldTransform3d = matrixCache2;
+    }
+    this._currentBounds = null;
+    return r || this.containerGetBounds(core.Matrix.IDENTITY);
+};
+
+Spine.prototype.spineGetLocalBounds = Spine.prototype.getLocalBounds;
+
+Spine.prototype.meshGetBounds = core.mesh.Mesh.prototype.getBounds;
+
+
+Spine.prototype.getBounds = function () {
+    if (!this._currentBounds) {
+        if (!is3d) {
+            if (this._boundsFound) {
+                this.vertices = this._boundsVertices;
+                this._currentBounds = this.meshGetBounds();
+                this.vertices = null;
+            } else
+                this._currentBounds = this.containerGetBounds();
+        } else {
+            if (this._boundsFound) {
+                this._currentBounds = core.flip.math3d.makeRectBoundsMesh(this._bounds2, this.worldTransform3d, this.projectionMatrix, this._boundsVertices);
+            } else {
+                var localBounds = this.spineGetLocalBounds();
+                if (localBounds === core.Rectangle.EMPTY) return this._currentBounds = localBounds;
+                this._currentBounds = core.flip.math3d.makeRectBounds(this._bounds2, this.worldTransform3d, this.projectionMatrix, localBounds.x, localBounds.y, localBounds.width, localBounds.height);
+            }
+        }
+    }
+    return this._currentBounds;
+};
+
+Spine.prototype.spineGetBounds = Spine.prototype.getBounds;
