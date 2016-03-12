@@ -725,7 +725,8 @@ spine.AttachmentType = {
     region: 0,
     boundingbox: 1,
     mesh: 2,
-    skinnedmesh: 3
+    skinnedmesh: 3,
+    weightedmesh : 4
 };
 module.exports = spine.AttachmentType;
 
@@ -2367,6 +2368,8 @@ spine.SkeletonJsonParser.prototype = {
             boneData.rotation = (boneMap["rotation"] || 0);
             boneData.scaleX = boneMap.hasOwnProperty("scaleX") ? boneMap["scaleX"] : 1;
             boneData.scaleY = boneMap.hasOwnProperty("scaleY") ? boneMap["scaleY"] : 1;
+            boneData.flipX = boneMap.hasOwnProperty("flipX") ? boneMap["flipX"] : false;
+            boneData.flipY = boneMap.hasOwnProperty("flipY") ? boneMap["flipY"] : false;
             boneData.inheritScale = boneMap.hasOwnProperty("inheritScale") ? boneMap["inheritScale"] : true;
             boneData.inheritRotation = boneMap.hasOwnProperty("inheritRotation") ? boneMap["inheritRotation"] : true;
             skeletonData.bones.push(boneData);
@@ -2527,7 +2530,7 @@ spine.SkeletonJsonParser.prototype = {
             mesh.width = (map["width"] || 0) * scale;
             mesh.height = (map["height"] || 0) * scale;
             return mesh;
-        } else if (type == spine.AttachmentType.skinnedmesh)
+        } else if (type == spine.AttachmentType.skinnedmesh || type == spine.AttachmentType.weightedmesh)
         {
             var mesh = this.attachmentLoader.newSkinnedMeshAttachment(skin, name, path);
             if (!mesh) return null;
@@ -3278,6 +3281,11 @@ module.exports = {
 var spine = require('../SpineRuntime');
 var atlasParser = require('../loaders/atlasParser');
 
+var is3d = !!PIXI.flip;
+var ContainerClass = is3d ? PIXI.flip.Container3d : PIXI.Container;;
+var SpriteClass = is3d ? PIXI.flip.Sprite3d : PIXI.Sprite;
+var updateTransformField = is3d ? "updateTransform3d" : "updateTransform";
+var setRotation = is3d? function(s, v) {s.rotation.z=v;} : function(s, v) {s.rotation=v;};
 /* Esoteric Software SPINE wrapper for pixi.js */
 spine.Bone.yDown = true;
 
@@ -3297,7 +3305,7 @@ spine.Bone.yDown = true;
  */
 function Spine(spineData)
 {
-    PIXI.Container.call(this);
+    ContainerClass.call(this);
 
     if (!spineData)
     {
@@ -3341,7 +3349,7 @@ function Spine(spineData)
     /**
      * An array of containers
      *
-     * @member {Container[]}
+     * @member {PIXI.flip.Container[]}
      */
     this.slotContainers = [];
 
@@ -3349,7 +3357,7 @@ function Spine(spineData)
     {
         var slot = this.skeleton.slots[i];
         var attachment = slot.attachment;
-        var slotContainer = new PIXI.Container();
+        var slotContainer = new ContainerClass();
         this.slotContainers.push(slotContainer);
         this.addChild(slotContainer);
 
@@ -3394,7 +3402,7 @@ Spine.fromAtlas = function(resourceName) {
     return new Spine(skeletonData);
 }
 
-Spine.prototype = Object.create(PIXI.Container.prototype);
+Spine.prototype = Object.create(ContainerClass.prototype);
 Spine.prototype.constructor = Spine;
 module.exports = Spine;
 
@@ -3413,14 +3421,12 @@ Object.defineProperties(Spine.prototype, {
      * @default true
      */
     autoUpdate: {
-        get: function ()
-        {
-            return (this.updateTransform === Spine.prototype.autoUpdateTransform);
+        get: function () {
+            return (this[updateTransformField] === Spine.prototype.autoUpdateTransform);
         },
 
-        set: function (value)
-        {
-            this.updateTransform = value ? Spine.prototype.autoUpdateTransform : PIXI.Container.prototype.updateTransform;
+        set: function (value) {
+            this[updateTransformField] = value ? Spine.prototype.autoUpdateTransform : ContainerClass.prototype[updateTransformField];
         }
     }
 });
@@ -3489,15 +3495,17 @@ Spine.prototype.update = function (dt)
             slotContainer.position.y = bone.worldY + attachment.x * bone.m10 + attachment.y * bone.m11;
             slotContainer.scale.x = bone.worldScaleX;
             slotContainer.scale.y = bone.worldScaleY;
-            slotContainer.rotation = -(slot.bone.worldRotation * spine.degRad);
+            var rot = -(slot.bone.worldRotation * spine.degRad);
             if (bone.worldFlipX) {
                 slotContainer.scale.x = -slotContainer.scale.x;
-                slotContainer.rotation = -slotContainer.rotation;
+                setRotation(slotContainer, -(slot.bone.worldRotation * spine.degRad));
+                rot = -rot;
             }
             if (bone.worldFlipY == spine.Bone.yDown) {
                 slotContainer.scale.y = -slotContainer.scale.y;
-                slotContainer.rotation = -slotContainer.rotation;
+                rot = -rot;
             }
+            setRotation(slotContainer, rot);
             slot.currentSprite.blendMode = slot.blendMode;
             slot.currentSprite.tint = PIXI.utils.rgb2hex([slot.r,slot.g,slot.b]);
         }
@@ -3557,7 +3565,7 @@ Spine.prototype.autoUpdateTransform = function ()
         this.lastTime = 0;
     }
 
-    PIXI.Container.prototype.updateTransform.call(this);
+    ContainerClass.prototype[updateTransformField].call(this);
 };
 
 /**
@@ -3576,20 +3584,22 @@ Spine.prototype.createSprite = function (slot, attachment)
                                         descriptor.rotate ? descriptor.height : descriptor.width,
                                         descriptor.rotate ? descriptor.width : descriptor.height);
     var spriteTexture = new PIXI.Texture(baseTexture, spriteRect);
-    var sprite = new PIXI.Sprite(spriteTexture);
+    var sprite = new SpriteClass(spriteTexture);
 
     var baseRotation = descriptor.rotate ? Math.PI * 0.5 : 0.0;
     sprite.scale.x = attachment.width / descriptor.originalWidth * attachment.scaleX;
     sprite.scale.y = attachment.height / descriptor.originalHeight * attachment.scaleY;
-    sprite.rotation = baseRotation - (attachment.rotation * spine.degRad);
+    setRotation(sprite, baseRotation - (attachment.rotation * spine.degRad));
     sprite.anchor.x = (0.5 * descriptor.originalWidth - descriptor.offsetX) / descriptor.width;
     sprite.anchor.y = 1.0 - ((0.5 * descriptor.originalHeight - descriptor.offsetY) / descriptor.height);
     sprite.alpha = attachment.a;
+
     if (descriptor.rotate) {
         var x1 = sprite.scale.x;
         sprite.scale.x = sprite.scale.y;
         sprite.scale.y = x1;
     }
+
     slot.sprites = slot.sprites || {};
     slot.sprites[descriptor.name] = sprite;
     return sprite;

@@ -8,11 +8,13 @@ function patchPixiSpine(options) {
 
     var core = PIXI;
     var spine = core.spine.SpineRuntime;
+    var is3d = core.flip;
+    var glMat = is3d ? core.flip.glMat : null;
 
     function SkinnedMeshShader(shaderManager) {
         var gl = shaderManager.renderer.gl;
-        var nVertexUniforms = gl.getParameter( gl.MAX_VERTEX_UNIFORM_VECTORS );
-        this.maxBones = Math.min(128, ((nVertexUniforms-10) / 2) | 0);
+        var nVertexUniforms = gl.getParameter(gl.MAX_VERTEX_UNIFORM_VECTORS);
+        this.maxBones = Math.min(128, ((nVertexUniforms - 10) / 2) | 0);
         core.Shader.call(this,
             shaderManager,
             // vertex shader
@@ -21,8 +23,8 @@ function patchPixiSpine(options) {
                 'attribute vec2 aTextureCoord;',
                 'attribute vec4 aSkin0, aSkin1, aSkin2, aSkin3;',
                 'attribute vec4 aFfd11, aFfd12, aFfd21, aFfd22, aFfd31, aFfd32, aFfd41, aFfd42;',
-                'uniform mat3 projectionMatrix;',
-                'uniform vec3 boneGlobalMatrices[' + this.maxBones*2 + '];',
+                is3d ? 'uniform mat4 projectionMatrix;' : 'uniform mat3 projectionMatrix;',
+                'uniform vec3 boneGlobalMatrices[' + this.maxBones * 2 + '];',
                 'uniform vec4 ffdAlpha;',
                 'varying vec2 vTextureCoord;',
 
@@ -37,7 +39,8 @@ function patchPixiSpine(options) {
                 '   skin[1] = vec3(aSkin1.yz + ffd[1], 1.0) * aSkin1.w;',
                 '   skin[2] = vec3(aSkin2.yz + ffd[2], 1.0) * aSkin2.w;',
                 '   skin[3] = vec3(aSkin3.yz + ffd[3], 1.0) * aSkin3.w;',
-                '   vec3 skinned = vec3( 0.0, 0.0, 1.0 );',
+                is3d ? 'vec4 skinned = vec4( 0.0, 0.0, 0.0, 1.0 );' :
+                    '   vec3 skinned = vec3( 0.0, 0.0, 1.0 );',
                 '   skinned.x += dot(skin[0], boneGlobalMatrices[ int(aSkin0.x) * 2 ]);',
                 '   skinned.y += dot(skin[0], boneGlobalMatrices[ int(aSkin0.x) * 2 + 1 ]);',
                 '   skinned.x += dot(skin[1], boneGlobalMatrices[ int(aSkin1.x) * 2 ]);',
@@ -46,7 +49,8 @@ function patchPixiSpine(options) {
                 '   skinned.y += dot(skin[2], boneGlobalMatrices[ int(aSkin2.x) * 2 + 1 ]);',
                 '   skinned.x += dot(skin[3], boneGlobalMatrices[ int(aSkin3.x) * 2 ]);',
                 '   skinned.y += dot(skin[3], boneGlobalMatrices[ int(aSkin3.x) * 2 + 1 ]);',
-                '   gl_Position = vec4(projectionMatrix * skinned, 1.0);',
+                is3d ? 'gl_Position = projectionMatrix * skinned;' :
+                    '   gl_Position = vec4(projectionMatrix * skinned, 1.0);',
                 '   vTextureCoord = aTextureCoord;',
                 '}'
             ].join('\n'),
@@ -66,7 +70,9 @@ function patchPixiSpine(options) {
                 tintAlpha: {type: '4f', value: [1, 1, 1, 1]},
                 uSampler: {type: 'sampler2D', value: 0},
                 ffdAlpha: {type: '4fv', value: new Float32Array(4)},
-                projectionMatrix: {type: 'mat3', value: new Float32Array(9)},
+                projectionMatrix: is3d ?
+                {type: 'mat4', value: glMat.mat4.create()} :
+                {type: 'mat3', value: new Float32Array(9)},
                 boneGlobalMatrices: {type: '3fv', value: new Float32Array(6)}
             },
             {
@@ -101,6 +107,9 @@ function patchPixiSpine(options) {
         core.ObjectRenderer.call(this, renderer);
         this.maxWeights = 4;
         this.boneSize = 9;
+        if (is3d) {
+            this.projection3d = glMat.mat4.create();
+        }
     }
 
     SpineMeshRenderer.prototype = Object.create(core.ObjectRenderer.prototype);
@@ -176,11 +185,30 @@ function patchPixiSpine(options) {
             }
         }
 
-        var tm = shader.uniforms.projectionMatrix;
+        if (is3d) {
+            var projection2d = this.renderer.currentRenderTarget.projectionMatrix;
+            var projection3d = this.projection3d;
+            glMat.mat4.identity(projection3d);
+
+            projection3d[0] = projection2d.a;
+            projection3d[5] = projection2d.d;
+
+            // tx // ty
+            projection3d[12] = projection2d.tx;
+            projection3d[13] = projection2d.ty;
+
+            var currentProjection = spineObj.projectionMatrix;
+            if (currentProjection) {
+                glMat.mat4.multiply(projection3d, projection3d, currentProjection);
+            }
+            glMat.mat4.multiply(shader.uniforms.projectionMatrix.value, projection3d, spineObj.worldTransform3d);
+        } else {
+            //TODO: dont create new array, please
+            this._globalMat = this._globalMat || new PIXI.Matrix();
+            renderer.currentRenderTarget.projectionMatrix.copy(this._globalMat).append(spineObj.worldTransform);
+            shader.uniforms.projectionMatrix.value = this._globalMat.toArray(true);
+        }
         //TODO: dont create new array, please
-        this._globalMat = this._globalMat || new PIXI.Matrix();
-        renderer.currentRenderTarget.projectionMatrix.copy(this._globalMat).append(spineObj.worldTransform);
-        tm.value = this._globalMat.toArray(true);
         shader.uniforms.boneGlobalMatrices.value = bonesArr;
         shader.syncUniforms();
         var uTint = shader.uniforms.tintAlpha;
@@ -303,7 +331,7 @@ function patchPixiSpine(options) {
 
         var maxBones = spineData.bones.length;
         var shader = this.renderer.shaderManager.plugins.skinnedMeshShader;
-        var bonesMode = spineData.skinnedMeshBonesMode = (maxBones > shader.maxBones)?1:0;
+        var bonesMode = spineData.skinnedMeshBonesMode = (maxBones > shader.maxBones) ? 1 : 0;
         if (bonesMode) {
             maxBones = 1;
         }
@@ -383,17 +411,17 @@ function patchPixiSpine(options) {
                     var bonesSet = {};
                     var bonesIndices = attachment.bonesIndices = [];
                     var bonesNum = 0;
-                    for (var s1 = s0; s1<ssize;s1+=4) {
+                    for (var s1 = s0; s1 < ssize; s1 += 4) {
                         var ss = skin[s1];
                         if (bonesMode && !bonesSet[ss]) {
                             bonesIndices.push(ss);
                             bonesSet[ss] = ++bonesNum;
                         }
-                        skin[s1] = bonesSet[ss]-1;
+                        skin[s1] = bonesSet[ss] - 1;
                     }
                     maxBones = Math.max(maxBones, bonesNum);
                     if (bonesNum > shader.maxBones) {
-                        console.log("SkinnedMeshRenderer at slot "+ a.meshSlot+" : It seems that your attachment '" + attachment.name
+                        console.log("SkinnedMeshRenderer at slot " + a.meshSlot + " : It seems that your attachment '" + attachment.name
                             + "' depends on too many bones, more than " + shader.maxBones + ". I'm terribly sorry, but it will look like shit.");
                     }
                 }
@@ -491,7 +519,6 @@ function patchPixiSpine(options) {
                 skinIndices.push(ind2);
                 ww += w;
             }
-            if (1.0-ww>1e-2) console.log(ww);
             for (var i = v + 1; i < skinIndices.length; i += 3) {
                 skinIndices[i] /= ww;
             }
@@ -557,10 +584,10 @@ function patchPixiSpine(options) {
                             //old format
                             for (var t = 0; t < timeline.getFrameCount(); t++) {
                                 var fV = timeline.frameVertices[t];
-                                for (var i=0;i<fV.length;i+=2) {
+                                for (var i = 0; i < fV.length; i += 2) {
                                     vertices[size++] = fV[i] - mesh.vertices[i];
-                                    vertices[size++] = fV[i+1] - mesh.vertices[i+1];
-                                    size += (maxWeights-1)*2;
+                                    vertices[size++] = fV[i + 1] - mesh.vertices[i + 1];
+                                    size += (maxWeights - 1) * 2;
                                 }
                             }
                         }
@@ -638,20 +665,20 @@ function patchPixiSpine(options) {
 
     //TODO: add new interaction check
 
-    core.spine.Spine.prototype.hideSlots = function() {
+    core.spine.Spine.prototype.hideSlots = function () {
         this._childrensAreInvisible = true;
-        for (var i=0;i<this.slotContainers.length;i++) {
+        for (var i = 0; i < this.slotContainers.length; i++) {
             var slot = this.slotContainers[i];
             var ch = slot.children[0];
             if (ch) {
                 ch.visible = false;
             }
         }
-    }
+    };
 
-    var oldRender = core.spine.Spine.prototype._renderWebGL;
+    var oldRender = core.spine.Spine.prototype._renderWebGL3d;
 
-    core.spine.Spine.prototype._renderWebGL = function (renderer) {
+    core.spine.Spine.prototype._renderWebGL3d = function (renderer) {
         if (!renderer.shaderManager.plugins.skinnedMeshShader.program) {
             this._childrensAreInvisible = false;
             return oldRender.call(this, renderer);
@@ -675,7 +702,7 @@ function patchPixiSpine(options) {
         this.skeleton.updateWorldTransform();
     };
 
-    core.spine.Spine.prototype.getLocalBounds = function() {
+    core.spine.Spine.prototype.getLocalBounds = function () {
         if (!this._childrensAreInvisible)
             return PIXI.Container.prototype.getLocalBounds.call(this);
         up.call(this, 0);
@@ -684,7 +711,7 @@ function patchPixiSpine(options) {
         return bounds;
     };
 
-    core.spine.Spine.prototype.getBounds = function() {
+    core.spine.Spine.prototype.getBounds = function () {
         if (!this.spineData.skinnedMeshId || !this.parent)
             return core.Container.prototype.getBounds.call(this);
         var now = Date.now();
@@ -700,7 +727,7 @@ function patchPixiSpine(options) {
         return this._boundsCache;
     };
 
-    core.spine.Spine.prototype.containsPoint = function(point) {
+    core.spine.Spine.prototype.containsPoint = function (point) {
         if (!this.getBounds().contains(point.x, point.y))
             return false;
         var skeleton = this.skeleton;
@@ -711,7 +738,7 @@ function patchPixiSpine(options) {
             this._boundsCache = null;
             this.getBounds();
         }
-        for (var i=0;i<skeleton.slots.length;i++) {
+        for (var i = 0; i < skeleton.slots.length; i++) {
             var slot = skeleton.slots[i];
             if (slot.attachment) {
                 var ch = slot.currentSprite || slot.currentMesh;
@@ -724,6 +751,6 @@ function patchPixiSpine(options) {
     };
 }; // end patch pixi spine
 
-patchPixiSpine( {
+patchPixiSpine({
     boundaryCacheLag: 200 //getBounds() cache lag in millis
 });

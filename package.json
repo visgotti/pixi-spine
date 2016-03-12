@@ -16,7 +16,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "pixi.js": "^3.0.9"
+    "pixi-spine.js": "^3.0.9"
   },
   "dependencies": {
     "gulp-mocha": "^2.1.3"
