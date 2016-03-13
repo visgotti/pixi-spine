@@ -369,7 +369,9 @@ Spine.prototype.getLocalBounds = function () {
 
     var r = null;
     if (this._boundsFound) {
-         r = this.meshGetBounds();
+        this.vertices = this._boundsVertices;
+        r = this.meshGetBounds();
+        this.vertices = null;
     } else {
         for (var i = 0, j = this.children.length; i < j; ++i) {
             this.children[i].updateTransform3d();
@@ -400,11 +402,11 @@ Spine.prototype.getBounds = function () {
                 this._currentBounds = this.containerGetBounds();
         } else {
             if (this._boundsFound) {
-                this._currentBounds = core.flip.math3d.makeRectBoundsMesh(this._bounds2, this.worldTransform3d, this.projectionMatrix, this._boundsVertices);
+                this._currentBounds = core.flip.math3d.makeRectBoundsMesh(this._bounds2, this.worldTransform3d, this.worldProjectionMatrix, this._boundsVertices);
             } else {
                 var localBounds = this.spineGetLocalBounds();
                 if (localBounds === core.Rectangle.EMPTY) return this._currentBounds = localBounds;
-                this._currentBounds = core.flip.math3d.makeRectBounds(this._bounds2, this.worldTransform3d, this.projectionMatrix, localBounds.x, localBounds.y, localBounds.width, localBounds.height);
+                this._currentBounds = core.flip.math3d.makeRectBounds(this._bounds2, this.worldTransform3d, this.worldProjectionMatrix, localBounds.x, localBounds.y, localBounds.width, localBounds.height);
             }
         }
     }
