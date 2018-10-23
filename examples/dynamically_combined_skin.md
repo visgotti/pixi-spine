@@ -13,7 +13,7 @@ and then change or default the skins with skin names anywhere in your code.
   
 
     // code to determine what skins your spine object will be initialized with
-    var weaponSkins = ["weapon-1, "weapon-2", null];
+    var weaponSkins = ["weapon-1", "weapon-2", null];
     var hatSkins = ["hat-1", "hat-2", null];
     var maskSkins = ["mask-1", "mask-2", null];
     var hairSkins = ["hair-1", "hair-2", null];
@@ -76,7 +76,7 @@ and then change or default the skins with skin names anywhere in your code.
     dynamicCombinedSkin.changeSkins(skins);
     
     var slots = ["weapon", "hat", "mask", "hair"];
-    dynamicCombinedSkins.setSlotsToDefault(slots);
+    dynamicCombinedSkin.setSlotsToDefault(slots);
     
     Array.prototype.randomElement = function () {
         return this[Math.floor(Math.random() * this.length)]
