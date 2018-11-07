@@ -1223,7 +1223,8 @@ declare module PIXI.spine {
         name: string;
         skeleton: core.Skeleton;
         slotNameMap: Map<string, core.Slot>;
-        constructor(skeleton: core.Skeleton, slotNames: Array<String>);
+        attachmentNameSlotMap: any;
+        constructor(skeleton: core.Skeleton, slotWithAttachments: Map<string, any>);
         addToSkeletonWithSkins(skinNames: any): void;
         addToSkeleton(): void;
         setSlotsToDefault(slotNames: any): void;

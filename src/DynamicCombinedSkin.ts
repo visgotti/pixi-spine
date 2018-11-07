@@ -6,23 +6,25 @@ namespace pixi_spine {
         name: string;
         skeleton: core.Skeleton;
         slotNameMap: Map<string, core.Slot>;
+        attachmentNameSlotMap = new Map <string, core.Slot>();
 
-        constructor(skeleton: core.Skeleton, slotNames: Array<String>) {
-            if(skeleton.skin.name === "Dynamic") {
-                throw new Error("Skeleton can only contain one dynamic skin.")
-            }
-
+        constructor(skeleton: core.Skeleton, slotWithAttachments: Map<string, any>) {
             super("Dynamic");
             this.skeleton = skeleton;
             this.slotNameMap = new Map<string, core.Slot>();
+            this.attachmentNameSlotMap = new Map <string, core.Slot>();
 
             // initialize slot data this skin will manage
             for (let i = 0; i < this.skeleton.slots.length; i++) {
                 let slot = this.skeleton.slots[i];
 
                 // if the combined sprite contains a skin for attachment
-                if(slotNames.indexOf(slot.data.name) > -1) {
+                if(slotWithAttachments.hasOwnProperty(slot.data.name)) {
                     this.slotNameMap[slot.data.name] = slot;
+                    for(let j = 0; j < slotWithAttachments[slot.data.name].length; j++){
+                        var attachmentName = slotWithAttachments[slot.data.name][j];
+                        this.attachmentNameSlotMap[attachmentName] = slot;
+                    }
                 }
             }
             this.skeleton.data.skins.push(this);
@@ -37,27 +39,45 @@ namespace pixi_spine {
             this.skeleton.skin = this;
         }
 
+        setAllSlotsToDefaultBesides(keepSlotNames) {
+            this.slotNameMap.forEach((value, key, map) => {
+                if(keepSlotNames.indexOf(key) < 0) {
+                    this.setSlotToDefault(key);
+                }
+            })
+        }
+
         setSlotsToDefault(slotNames) {
             for(var i = 0; i < slotNames.length; i++) {
-                this.setSlotsToDefault(slotNames[i]);
+                this.setSlotToDefault(slotNames[i]);
             }
         }
 
         setSlotToDefault(slotName) {
-            if(this.slotNameMap[slotName]) {
-                this.slotNameMap[slotName].attachment = null;
+            let slot = this.slotNameMap[slotName];
+            if(slot) {
+                slot.setAttachment(null);
+                delete this.attachments[slot.data.index];
             }
         }
 
         changeSkin(skinName) {
             let skin = this.skeleton.data.findSkin(skinName);
+
+            if(!(skin)) {
+                console.warn("tried changing skin to: " + skinName + " which didn't exist")
+                return;
+            }
+
             for(let i = 0; i < skin.attachments.length; i++) {
                 let attachmentMap = skin.attachments[i];
-                for(let slotName in attachmentMap) {
-                    if(this.slotNameMap[slotName]){
-                        let slot = this.slotNameMap[slotName];
-                        this.addAttachment(slot.data.index, slotName, attachmentMap[slotName]);
-                        slot.setAttachment(attachmentMap[slotName]);
+                for(let attachment in attachmentMap) {
+                    if(this.attachmentNameSlotMap[attachment]){
+                        let slot = this.attachmentNameSlotMap[attachment];
+                        this.addAttachment(slot.data.index, attachment, attachmentMap[attachment]);
+                        if(slot.data.attachmentName) {
+                            slot.setAttachment(attachmentMap[attachment]);
+                        }
                     }
                 }
             }

@@ -6634,18 +6634,20 @@ var pixi_spine;
 (function (pixi_spine) {
     var DynamicCombinedSkin = (function (_super) {
         __extends(DynamicCombinedSkin, _super);
-        function DynamicCombinedSkin(skeleton, slotNames) {
-            var _this = this;
-            if (skeleton.skin.name === "Dynamic") {
-                throw new Error("Skeleton can only contain one dynamic skin.");
-            }
-            _this = _super.call(this, "Dynamic") || this;
+        function DynamicCombinedSkin(skeleton, slotWithAttachments) {
+            var _this = _super.call(this, "Dynamic") || this;
+            _this.attachmentNameSlotMap = new Map();
             _this.skeleton = skeleton;
             _this.slotNameMap = new Map();
+            _this.attachmentNameSlotMap = new Map();
             for (var i = 0; i < _this.skeleton.slots.length; i++) {
                 var slot = _this.skeleton.slots[i];
-                if (slotNames.indexOf(slot.data.name) > -1) {
+                if (slotWithAttachments.hasOwnProperty(slot.data.name)) {
                     _this.slotNameMap[slot.data.name] = slot;
+                    for (var j = 0; j < slotWithAttachments[slot.data.name].length; j++) {
+                        var attachmentName = slotWithAttachments[slot.data.name][j];
+                        _this.attachmentNameSlotMap[attachmentName] = slot;
+                    }
                 }
             }
             _this.skeleton.data.skins.push(_this);
@@ -6664,19 +6666,27 @@ var pixi_spine;
             }
         };
         DynamicCombinedSkin.prototype.setSlotToDefault = function (slotName) {
-            if (this.slotNameMap[slotName]) {
-                this.slotNameMap[slotName].attachment = null;
+            var slot = this.slotNameMap[slotName];
+            if (slot) {
+                slot.setAttachment(null);
+                delete this.attachments[slot.data.index];
             }
         };
         DynamicCombinedSkin.prototype.changeSkin = function (skinName) {
             var skin = this.skeleton.data.findSkin(skinName);
+            if (!(skin)) {
+                console.warn("tried changing skin to: " + skinName + " which didn't exist");
+                return;
+            }
             for (var i = 0; i < skin.attachments.length; i++) {
                 var attachmentMap = skin.attachments[i];
-                for (var slotName in attachmentMap) {
-                    if (this.slotNameMap[slotName]) {
-                        var slot = this.slotNameMap[slotName];
-                        this.addAttachment(slot.data.index, slotName, attachmentMap[slotName]);
-                        slot.setAttachment(attachmentMap[slotName]);
+                for (var attachment in attachmentMap) {
+                    if (this.attachmentNameSlotMap[attachment]) {
+                        var slot = this.attachmentNameSlotMap[attachment];
+                        this.addAttachment(slot.data.index, attachment, attachmentMap[attachment]);
+                        if (slot.data.attachmentName) {
+                            slot.setAttachment(attachmentMap[attachment]);
+                        }
                     }
                 }
             }
