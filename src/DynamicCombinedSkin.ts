@@ -56,7 +56,7 @@ namespace pixi_spine {
                 for(let slotName in attachmentMap) {
                     if(this.slotNameMap[slotName]){
                         let slot = this.slotNameMap[slotName];
-                        this.addAttachment(slot.data.index, slotName, attachmentMap[slotName]);
+                        this.setAttachment(slot.data.index, slotName, attachmentMap[slotName]);
                         slot.setAttachment(attachmentMap[slotName]);
                     }
                 }

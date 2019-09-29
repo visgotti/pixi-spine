@@ -30,16 +30,18 @@
  *****************************************************************************/
 
 namespace pixi_spine.core {
-    export class IkConstraintData {
-        name: string;
-        order = 0;
+    export class IkConstraintData extends ConstraintData {
         bones = new Array<BoneData>();
         target: BoneData;
         bendDirection = 1;
+        compress = false;
+        stretch = false;
+        uniform = false;
         mix = 1;
+        softness = 0;
 
-        constructor(name: string) {
-            this.name = name;
+        constructor (name: string) {
+            super(name, 0, false);
         }
     }
 }

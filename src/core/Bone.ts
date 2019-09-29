@@ -64,6 +64,7 @@ namespace pixi_spine.core {
         appliedValid = false;
 
         sorted = false;
+        active = false;
 
         /** @param parent May be null. */
         constructor(data: BoneData, skeleton: Skeleton, parent: Bone) {
@@ -73,6 +74,10 @@ namespace pixi_spine.core {
             this.skeleton = skeleton;
             this.parent = parent;
             this.setToSetupPose();
+        }
+
+        isActive () {
+            return this.active;
         }
 
         /** Same as {@link #updateWorldTransform()}. This method exists for Bone to implement {@link Updatable}. */
@@ -98,29 +103,19 @@ namespace pixi_spine.core {
 
             let parent = this.parent;
             let m = this.matrix;
+
+            let sx = this.skeleton.scaleX;
+            let sy = Bone.yDown? -this.skeleton.scaleY : this.skeleton.scaleY;
+
             if (parent == null) { // Root bone.
-                let rotationY = rotation + 90 + shearY;
-                let la = MathUtils.cosDeg(rotation + shearX) * scaleX;
-                let lb = MathUtils.cosDeg(rotationY) * scaleY;
-                let lc = MathUtils.sinDeg(rotation + shearX) * scaleX;
-                let ld = MathUtils.sinDeg(rotationY) * scaleY;
                 let skeleton = this.skeleton;
-                if (skeleton.flipX) {
-                    x = -x;
-                    la = -la;
-                    lb = -lb;
-                }
-                if (skeleton.flipY !== Bone.yDown) {
-                    y = -y;
-                    lc = -lc;
-                    ld = -ld;
-                }
-                m.a = la;
-                m.c = lb;
-                m.b = lc;
-                m.d = ld;
-                m.tx = x + skeleton.x;
-                m.ty = y + skeleton.y;
+                let rotationY = rotation + 90 + shearY;
+                m.a = MathUtils.cosDeg(rotation + shearX) * scaleX * sx;
+                m.c = MathUtils.cosDeg(rotationY) * scaleY * sx;
+                m.b = MathUtils.sinDeg(rotation + shearX) * scaleX * sy;
+                m.d = MathUtils.sinDeg(rotationY) * scaleY * sy;
+                m.tx = x * sx + skeleton.x;
+                m.ty = y * sy + skeleton.y;
                 return;
             }
 
@@ -177,13 +172,19 @@ namespace pixi_spine.core {
                 case TransformMode.NoScaleOrReflection: {
                     let cos = MathUtils.cosDeg(rotation);
                     let sin = MathUtils.sinDeg(rotation);
-                    let za = pa * cos + pb * sin;
-                    let zc = pc * cos + pd * sin;
+                    let za = (pa * cos + pb * sin) / sx;
+                    let zc = (pc * cos + pd * sin) / sy;
                     let s = Math.sqrt(za * za + zc * zc);
                     if (s > 0.00001) s = 1 / s;
                     za *= s;
                     zc *= s;
                     s = Math.sqrt(za * za + zc * zc);
+                    if (
+                        this.data.transformMode == TransformMode.NoScale
+                        && (pa * pd - pb * pc < 0) != (Bone.yDown?
+                        (this.skeleton.scaleX < 0 != this.skeleton.scaleY > 0) :
+                            (this.skeleton.scaleX < 0 != this.skeleton.scaleY < 0))
+                    ) s = -s;
                     let r = Math.PI / 2 + Math.atan2(zc, za);
                     let zb = Math.cos(r) * s;
                     let zd = Math.sin(r) * s;
@@ -191,25 +192,17 @@ namespace pixi_spine.core {
                     let lb = MathUtils.cosDeg(90 + shearY) * scaleY;
                     let lc = MathUtils.sinDeg(shearX) * scaleX;
                     let ld = MathUtils.sinDeg(90 + shearY) * scaleY;
-                    if (this.data.transformMode != core.TransformMode.NoScaleOrReflection ? pa * pd - pb * pc < 0 : ((this.skeleton.flipX != this.skeleton.flipY) != Bone.yDown)) {
-                        zb = -zb;
-                        zd = -zd;
-                    }
                     m.a = za * la + zb * lc;
                     m.c = za * lb + zb * ld;
                     m.b = zc * la + zd * lc;
                     m.d = zc * lb + zd * ld;
-                    return;
+                    break;
                 }
             }
-            if (this.skeleton.flipX) {
-                m.a = -m.a;
-                m.c = -m.c;
-            }
-            if (this.skeleton.flipY != Bone.yDown) {
-                m.b = -m.b;
-                m.d = -m.d;
-            }
+            m.a *= sx;
+            m.c *= sx;
+            m.b *= sy;
+            m.d *= sy;
         }
 
         setToSetupPose() {
